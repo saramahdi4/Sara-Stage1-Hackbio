@@ -180,6 +180,38 @@ do
     echo "Processing $sample ..."
     abricate --db vfdb assemblies/$sample/contigs.fasta > abricate_vfdb_results/${sample}_vfdb.txt
 done
+
+#toxin results from 3 samples
+
+#hly
+
+#plcA
+
+#plcB
+
+#mpl
+
+#actA
+
+#llsA
+
+#llsB
+
+#llsD
+
+#llsG
+
+#llsH
+
+#llsX
+
+#llsY
+
+#llsP
+
+#iap (p60)
+
+
 # recommended antibiotics
 
 #Ampicillin (first-line)
