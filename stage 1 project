@@ -1,0 +1,198 @@
+#!/bin/bash
+
+mkdir microbe_stage1
+cd microbe_stage1
+
+mkdir raw_samples
+cd raw_samples
+nano raw.sh #the raw.sh file contains curl command to download 50 of the raw samples provided
+
+#save and exit
+bash raw.sh
+cd ../
+mkdir -p qc
+fastqc raw_samples/*.fastq.gz -o qc/
+
+!/bin/bash
+# Simple pipeline: Fastp on all paired-end samples
+
+mkdir -p clean_samples fastp_reports
+
+for fq in raw_samples/*_1.fastq.gz
+do
+    # Extract sample name
+    sample=$(basename $fq _1.fastq.gz)
+
+    # Run Fastp
+    fastp \
+        -i raw_samples/${sample}_1.fastq.gz \
+        -I raw_samples/${sample}_2.fastq.gz \
+        -o clean_samples/${sample}_1.clean.fastq.gz \
+        -O clean_samples/${sample}_2.clean.fastq.gz \
+        -h fastp_reports/${sample}.html \
+        -j fastp_reports/${sample}.json
+done
+
+#check data post trimming
+
+#Assembly using Spades.py
+
+# Make an assemblies directory first
+mkdir -p assemblies
+
+# Sample 1: SRR27013294
+spades.py --only-assembler \
+  -1 clean_samples/SRR27013294_Genome_Sequencing_of_Listeria_monocytogenes_SA_outbreak_2017_1.clean.fastq.gz \
+  -2 clean_samples/SRR27013294_Genome_Sequencing_of_Listeria_monocytogenes_SA_outbreak_2017_2.clean.fastq.gz \
+  -o assemblies/SRR27013294 \
+
+
+# Sample 2: SRR27013296
+spades.py  --only-assembler \
+  -1 clean_samples/SRR27013296_Genome_Sequencing_of_Listeria_monocytogenes_SA_outbreak_2017_1.clean.fastq.gz \
+  -2 clean_samples/SRR27013296_Genome_Sequencing_of_Listeria_monocytogenes_SA_outbreak_2017_2.clean.fastq.gz \
+  -o assemblies/SRR27013296 \
+  
+
+# Sample 3: SRR27013297
+spades.py --only-assembler \
+  -1 clean_samples/SRR27013297_Genome_Sequencing_of_Listeria_monocytogenes_SA_outbreak_2017_1.clean.fastq.gz \
+  -2 clean_samples/SRR27013297_Genome_Sequencing_of_Listeria_monocytogenes_SA_outbreak_2017_2.clean.fastq.gz \
+  -o assemblies/SRR27013297 \
+  
+
+
+#the identity of the organism was confirmed to be Listeria monocytogenes using blast, i used 3 of the samples to check
+
+#Using Abricate
+# antimicrobial resistance (AMR) profile 
+# Make output directory
+mkdir -p abricate
+
+# samples
+samples=("SRR27013294" "SRR27013296" "SRR27013297")
+
+# Run Abricate on each contigs.fasta
+for sample in "${samples[@]}"
+do
+    abricate assemblies/$sample/contigs.fasta > abricate/${sample}_abricate.txt
+done
+
+# 2 AMR genes were detected: 1. fosX → confers resistance to FOSFOMYCIN
+
+#                            2. lmo0919_fam → confers resistance to LINCOSAMIDE
+
+#alignment
+
+#index the reference file
+
+bwa index ref.fasta
+
+mkdir alignment
+
+# Sample SRR27013294
+bwa mem ref.fasta \
+  clean_samples/SRR27013294_Genome_Sequencing_of_Listeria_monocytogenes_SA_outbreak_2017_1.clean.fastq.gz \
+  clean_samples/SRR27013294_Genome_Sequencing_of_Listeria_monocytogenes_SA_outbreak_2017_2.clean.fastq.gz \
+  > assemblies/SRR27013294/sample.sam
+
+# Sample SRR27013296
+bwa mem ref.fasta \
+  clean_samples/SRR27013296_Genome_Sequencing_of_Listeria_monocytogenes_SA_outbreak_2017_1.clean.fastq.gz \
+  clean_samples/SRR27013296_Genome_Sequencing_of_Listeria_monocytogenes_SA_outbreak_2017_2.clean.fastq.gz \
+  > assemblies/SRR27013296/sample.sam
+
+# Sample SRR27013297
+bwa mem ref.fasta \
+  clean_samples/SRR27013297_Genome_Sequencing_of_Listeria_monocytogenes_SA_outbreak_2017_1.clean.fastq.gz \
+  clean_samples/SRR27013297_Genome_Sequencing_of_Listeria_monocytogenes_SA_outbreak_2017_2.clean.fastq.gz \
+  > assemblies/SRR27013297/sample.sam
+
+# Converting sam to bam
+# Script: bam.sh
+# Converts SAM -> BAM -> Sorted BAM + Index
+
+mkdir -p bam
+
+for sample in SRR27013294 SRR27013296 SRR27013297
+do
+    echo "Processing $sample ..."
+
+    # Input SAM path (corrected filename)
+    sam_file="assemblies/$sample/sample.sam"
+
+    # Output BAM path
+    bam_file="bam/${sample}.bam"
+    sorted_bam="bam/${sample}.sorted.bam"
+
+    # Convert SAM -> BAM
+    samtools view -S -b "$sam_file" > "$bam_file"
+
+    # Sort BAM
+    samtools sort "$bam_file" -o "$sorted_bam"
+
+    # Index BAM
+    samtools index "$sorted_bam"
+
+    echo "Done: $sorted_bam and index created."
+done
+
+#index the ref file for GATK
+
+samtools faidx ref.fasta
+gatk CreateSequenceDictionary -R ref.fasta
+
+# Directories
+mkdir -p bam_fixed variants
+
+# Reference genome
+REF="ref.fasta"
+
+# Samples
+samples=("SRR27013294" "SRR27013296" "SRR27013297")
+
+# Loop through each sample
+for sample in "${samples[@]}"; do
+    echo ">>> Processing $sample ..."
+
+    # Step 1: Add Read Groups
+    gatk AddOrReplaceReadGroups \
+      -I bam/${sample}.sorted.bam \
+      -O bam_fixed/${sample}.RG.bam \
+      -RGID 1 -RGLB lib1 -RGPL illumina -RGPU unit1 -RGSM ${sample}
+
+    # Step 2: Index BAM
+    samtools index bam_fixed/${sample}.RG.bam
+
+    # Step 3: Run HaplotypeCaller
+    gatk HaplotypeCaller \
+      -R $REF \
+      -I bam_fixed/${sample}.RG.bam \
+      -O variants/${sample}.vcf.gz
+
+    echo ">>> Done: variants/${sample}.vcf.gz created."
+done
+
+#Toxin results for the 3 files
+mkdir -p abricate_vfdb_results
+
+for sample in SRR27013294 SRR27013296 SRR27013297
+do
+    echo "Processing $sample ..."
+    abricate --db vfdb assemblies/$sample/contigs.fasta > abricate_vfdb_results/${sample}_vfdb.txt
+done
+# recommended antibiotics
+
+#Ampicillin (first-line)
+
+#Ampicillin + Gentamicin (for severe infections, e.g., CNS or sepsis)
+
+#Trimethoprim-sulfamethoxazole (TMP-SMX) (if allergic to penicillin)
+
+#Meropenem (in special cases with severe infection or resistance concerns)
+
+
+
+
+
+
