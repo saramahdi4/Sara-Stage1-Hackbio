@@ -13,7 +13,6 @@ cd ../
 mkdir -p qc
 fastqc raw_samples/*.fastq.gz -o qc/
 
-!/bin/bash
 # Simple pipeline: Fastp on all paired-end samples
 
 mkdir -p clean_samples fastp_reports
@@ -62,7 +61,7 @@ spades.py --only-assembler \
   
 
 
-#the identity of the organism was confirmed to be Listeria monocytogenes using blast, i used 3 of the samples to check
+#the identity of the organism was confirmed to be Listeria monocytogenes using blast, used 3 of the samples to check
 
 #Using Abricate
 # antimicrobial resistance (AMR) profile 
